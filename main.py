@@ -1,69 +1,106 @@
 import os
 import json
-from pypdf import PdfReader
+from typing import List
 from FlagEmbedding import BGEM3FlagModel
 import faiss
 import numpy as np
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from functools import lru_cache
 
-# Hàm chia nhỏ văn bản thành đoạn ngắn (chunk)
-def chunk_text(text, chunk_size=200):
-    words = text.split()
-    return [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+app = FastAPI(title="Document QA API")
 
-# Khởi tạo model
-model = BGEM3FlagModel('BAAI/bge-m3', use_fp16=True)
+INDEX_PATH = "faiss.index"
+CHUNKS_PATH = "chunks.json"
+DOCS_DIR = "pdf_docs"
+MODEL_NAME = "BAAI/bge-m3"
 
-# Thư mục chứa nhiều PDF
-pdf_dir = "pdf_docs"
 
-all_chunks = []
-metadata = []
+class QueryRequest(BaseModel):
+    question: str
+    topk: int = 5
+    threshold: float = 0.6
 
-# Đọc tất cả PDF và chia nhỏ thành đoạn
-for fname in os.listdir(pdf_dir):
-    if fname.endswith(".pdf"):
-        reader = PdfReader(os.path.join(pdf_dir, fname))
-        for page_num, page in enumerate(reader.pages):
-            text = page.extract_text()
-            if text:
-                chunks = chunk_text(text, chunk_size=200)
-                for chunk in chunks:
-                    all_chunks.append(chunk)
-                    metadata.append({"file": fname, "page": page_num})
 
-# Sinh embedding cho toàn bộ chunk
-embs = model.encode(all_chunks, batch_size=8, max_length=512)['dense_vecs']
-embs = np.array(embs).astype("float32")
+class RebuildRequest(BaseModel):
+    docs_dir: str = DOCS_DIR
+    index_path: str = INDEX_PATH
+    chunks_path: str = CHUNKS_PATH
 
-# Tạo FAISS index
-index = faiss.IndexFlatL2(embs.shape[1])
-index.add(embs)
 
-# Câu hỏi
-query = "thời gian bảo hành iphone bao lâu"
-q_emb = model.encode([query], max_length=256)['dense_vecs']
-q_emb = np.array(q_emb).astype("float32")
+def load_index_and_chunks(index_path=INDEX_PATH, chunks_path=CHUNKS_PATH):
+    if not os.path.exists(index_path) or not os.path.exists(chunks_path):
+        raise FileNotFoundError("Index or chunks file not found. Build the index first.")
+    index = faiss.read_index(index_path)
+    with open(chunks_path, "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+    return index, chunks
 
-# Tìm top-5 đoạn liên quan
-D, I = index.search(q_emb, k=5)
 
-# Lọc kết quả theo ngưỡng khoảng cách và chỉ lấy top-3 ngắn nhất
-threshold = 0.6
-results = [
-    {
-        "text": all_chunks[idx],
-        "file": metadata[idx]["file"],
-        "page": metadata[idx]["page"],
-        "score": float(dist)
-    }
-    for dist, idx in zip(D[0], I[0]) if dist < threshold
-]
-results = sorted(results, key=lambda x: len(x["text"]))[:3]
+def ensure_model():
+    return BGEM3FlagModel(MODEL_NAME, use_fp16=True)
 
-# Xuất JSON
-output = {
-    "question": query,
-    "results": results
-}
 
-print(json.dumps(output, ensure_ascii=False, indent=2))
+# Simple in-memory cache for repeated identical queries
+query_cache = {}
+
+
+@app.on_event("startup")
+def startup_event():
+    global index, chunks, model
+    try:
+        index, chunks = load_index_and_chunks()
+        print("Loaded existing index and chunks")
+    except FileNotFoundError:
+        index = None
+        chunks = []
+        print("No existing index found at startup")
+    model = ensure_model()
+
+
+@app.post("/query")
+def query(req: QueryRequest):
+    if index is None:
+        raise HTTPException(status_code=400, detail="Index not available. Call /rebuild first.")
+
+    q = req.question.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Empty question")
+
+    cache_key = f"{q}|{req.topk}|{req.threshold}"
+    if cache_key in query_cache:
+        return {"question": q, "results": query_cache[cache_key], "cached": True}
+
+    q_emb = model.encode([q], max_length=256)["dense_vecs"]
+    q_emb = np.array(q_emb).astype("float32")
+    D, I = index.search(q_emb, k=req.topk)
+
+    results = []
+    for dist, idx in zip(D[0], I[0]):
+        if idx < 0:
+            continue
+        if dist >= req.threshold:
+            continue
+        item = chunks[idx]
+        results.append({"text": item.get("text"), "file": item.get("file"), "page": item.get("page"), "score": float(dist)})
+
+    query_cache[cache_key] = results
+    return {"question": q, "results": results, "cached": False}
+
+
+@app.post("/rebuild")
+def rebuild(req: RebuildRequest):
+    # import locally to avoid circular imports at module import time
+    import build_index
+
+    build_index.build_index(req.docs_dir, req.index_path, req.chunks_path, MODEL_NAME, batch_size=8, chunk_size=200)
+    # reload
+    global index, chunks
+    index, chunks = load_index_and_chunks(req.index_path, req.chunks_path)
+    query_cache.clear()
+    return {"status": "ok", "index": req.index_path, "chunks": req.chunks_path}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
