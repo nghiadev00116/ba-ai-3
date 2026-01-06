@@ -42,6 +42,66 @@ Chạy chương trình:
 python main.py
 ```
 
+Build index once and query many times:
+
+- Tạo index (chỉ chạy 1 lần, lưu ra `faiss.index` và `chunks.json`):
+
+```bash
+python build_index.py --docs pdf_docs --index faiss.index --chunks chunks.json
+```
+
+- Mở chế độ tương tác để hỏi nhiều câu (không cần đọc lại file mỗi lần):
+
+```bash
+python query.py --index faiss.index --chunks chunks.json
+```
+
+Tham số hữu ích:
+- `--topk`: số ứng viên trả về (mặc định 5)
+- `--threshold`: ngưỡng khoảng cách FAISS để lọc kết quả (mặc định 0.6)
+
+HTTP API (dùng Postman):
+
+- Chạy server bằng `uvicorn` hoặc trực tiếp bằng `python main.py`:
+
+```bash
+# bằng uvicorn (khuyến nghị)
+uvicorn main:app --host 127.0.0.1 --port 8000
+
+# hoặc trực tiếp (chạy uvicorn nội bộ)
+python main.py
+```
+
+- Endpoint hỏi:
+
+POST http://127.0.0.1:8000/query
+
+Body (JSON):
+
+```json
+{
+	"question": "Câu hỏi của bạn",
+	"topk": 5,
+	"threshold": 0.6
+}
+```
+
+- Endpoint rebuild (xây lại index từ thư mục `pdf_docs`):
+
+POST http://127.0.0.1:8000/rebuild
+
+Body (JSON, optional):
+
+```json
+{
+	"docs_dir": "pdf_docs",
+	"index_path": "faiss.index",
+	"chunks_path": "chunks.json"
+}
+```
+
+Ghi chú: server sẽ giữ index, chunks và mô hình trong bộ nhớ (cache) để trả lời nhiều yêu cầu mà không phải đọc lại file.
+
 Thiết kế & ghi chú kỹ thuật:
 - `main.py` dùng `BGEM3FlagModel('BAAI/bge-m3')` để sinh embedding.
 - Văn bản từ PDF được chia theo số từ (`chunk_size=200`) rồi mã hóa theo lô (`batch_size=8`).

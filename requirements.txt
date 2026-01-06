@@ -4,6 +4,13 @@ flagembedding==1.3.5
 faiss-cpu==1.13.2
 numpy==2.4.0
 
+# For Word (.docx) support
+python-docx
+ 
+# Web API
+fastapi
+uvicorn[standard]
+
 # Notes:
 # - On some systems the FAISS package name/version may differ (e.g. `faiss-gpu`).
 # - Add other packages if your runtime needs them (transformers, torch, etc.).
