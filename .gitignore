@@ -1,0 +1,5 @@
+bge_env/
+chunks.json
+faiss.index
+__pycache__/
+pdf_docs/
