@@ -11,6 +11,12 @@ import faiss
 import numpy as np
 
 
+def normalize_embeddings(embs):
+    """Normalize embeddings to unit length for cosine similarity."""
+    norms = np.linalg.norm(embs, axis=1, keepdims=True)
+    return embs / np.clip(norms, 1e-12, None)
+
+
 def chunk_text(text, chunk_size=200):
     words = text.split()
     return [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
@@ -56,9 +62,14 @@ def build_index(pdf_dir, index_path, chunks_path, model_name, batch_size, chunk_
     print(f"Encoding {len(all_chunks)} chunks...")
     embs = model.encode(all_chunks, batch_size=batch_size, max_length=512)['dense_vecs']
     embs = np.array(embs).astype("float32")
+    
+    # Normalize for cosine similarity
+    print("Normalizing embeddings for cosine similarity...")
+    embs = normalize_embeddings(embs)
 
     dim = embs.shape[1]
-    index = faiss.IndexFlatL2(dim)
+    # Use IndexFlatIP (inner product) on normalized vectors = cosine similarity
+    index = faiss.IndexFlatIP(dim)
     index.add(embs)
 
     faiss.write_index(index, index_path)

@@ -7,8 +7,15 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from functools import lru_cache
+from gemini_api import ask_gemini
 
 app = FastAPI(title="Document QA API")
+
+
+def normalize_embeddings(embs):
+    """Normalize embeddings to unit length for cosine similarity."""
+    norms = np.linalg.norm(embs, axis=1, keepdims=True)
+    return embs / np.clip(norms, 1e-12, None)
 
 INDEX_PATH = "faiss.index"
 CHUNKS_PATH = "chunks.json"
@@ -18,8 +25,8 @@ MODEL_NAME = "BAAI/bge-m3"
 
 class QueryRequest(BaseModel):
     question: str
-    topk: int = 5
-    threshold: float = 0.6
+    topk: int = 20
+    threshold: float = 0.6  # Cosine similarity threshold
 
 
 class RebuildRequest(BaseModel):
@@ -69,23 +76,25 @@ def query(req: QueryRequest):
 
     cache_key = f"{q}|{req.topk}|{req.threshold}"
     if cache_key in query_cache:
-        return {"question": q, "results": query_cache[cache_key], "cached": True}
-
-    q_emb = model.encode([q], max_length=256)["dense_vecs"]
-    q_emb = np.array(q_emb).astype("float32")
-    D, I = index.search(q_emb, k=req.topk)
-
-    results = []
-    for dist, idx in zip(D[0], I[0]):
-        if idx < 0:
-            continue
-        if dist >= req.threshold:
-            continue
-        item = chunks[idx]
-        results.append({"text": item.get("text"), "file": item.get("file"), "page": item.get("page"), "score": float(dist)})
-
-    query_cache[cache_key] = results
-    return {"question": q, "results": results, "cached": False}
+        results = query_cache[cache_key]
+    else:
+        q_emb = model.encode([q], max_length=256)["dense_vecs"]
+        q_emb = np.array(q_emb).astype("float32")
+        q_emb = normalize_embeddings(q_emb)
+        D, I = index.search(q_emb, k=req.topk)
+        results = []
+        for similarity, idx in zip(D[0], I[0]):
+            if idx < 0:
+                continue
+            if similarity < req.threshold:
+                continue
+            item = chunks[idx]
+            results.append({"text": item.get("text"), "file": item.get("file"), "page": item.get("page"), "score": float(similarity)})
+        query_cache[cache_key] = results
+    # Gọi Gemini
+    payload = {"question": q, "results": results}
+    gemini_answer = ask_gemini(payload)
+    return {"gemini_answer": gemini_answer}
 
 
 @app.post("/rebuild")

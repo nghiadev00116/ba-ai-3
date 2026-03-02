@@ -14,3 +14,4 @@ uvicorn[standard]
 # Notes:
 # - On some systems the FAISS package name/version may differ (e.g. `faiss-gpu`).
 # - Add other packages if your runtime needs them (transformers, torch, etc.).
+tiktoken
