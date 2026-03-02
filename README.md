@@ -58,7 +58,7 @@ python query.py --index faiss.index --chunks chunks.json
 
 Tham số hữu ích:
 - `--topk`: số ứng viên trả về (mặc định 5)
-- `--threshold`: ngưỡng khoảng cách FAISS để lọc kết quả (mặc định 0.6)
+- `--threshold`: ngưỡng cosine similarity (0–1, mặc định 0.7). Giá trị cao hơn = chặt chẽ hơn. Thử 0.65–0.8 tùy yêu cầu.
 
 HTTP API (dùng Postman):
 
@@ -82,15 +82,11 @@ Body (JSON):
 {
 	"question": "Câu hỏi của bạn",
 	"topk": 5,
-	"threshold": 0.6
+  "threshold": 0.7
 }
 ```
 
-- Endpoint rebuild (xây lại index từ thư mục `pdf_docs`):
-
-POST http://127.0.0.1:8000/rebuild
-
-Body (JSON, optional):
+**Ghi chú về threshold**: Sau khi chuyển sang cosine similarity, `threshold` là giá trị từ 0–1 (0.7 nghĩa là cosine >= 0.7). Giá trị cao hơn = kết quả khớp chặt chẽ hơn.
 
 ```json
 {
@@ -105,11 +101,28 @@ Ghi chú: server sẽ giữ index, chunks và mô hình trong bộ nhớ (cache)
 Thiết kế & ghi chú kỹ thuật:
 - `main.py` dùng `BGEM3FlagModel('BAAI/bge-m3')` để sinh embedding.
 - Văn bản từ PDF được chia theo số từ (`chunk_size=200`) rồi mã hóa theo lô (`batch_size=8`).
-- FAISS index sử dụng `IndexFlatL2` và ví dụ truy vấn trả về top-k kết quả.
+- **Cosine similarity**: Tất cả embeddings được chuẩn hoá (normalized) và FAISS index dùng `IndexFlatIP` (inner product trên vector chuẩn = cosine similarity).
+- Kết quả trả về có `score` là cosine similarity (0–1, cao hơn = liên quan hơn).
 
 Thay đổi gợi ý / bước tiếp theo:
 - Thêm `requirements.txt` hoặc `pyproject.toml` để quản lý phụ thuộc rõ ràng.
 - Viết script/CLI để cho phép nhập câu hỏi từ người dùng (hiện `query` trong `main.py` là cố định).
 - Lưu index FAISS ra file để không phải rebuild mỗi lần.
+
+Chạy thử query.py (giao diện dòng lệnh):
+
+```bash
+source bge_env/bin/activate
+python query.py --index faiss.index --chunks chunks.json --topk 5 --threshold 0.6
+```
+Sau đó nhập câu hỏi trực tiếp, ví dụ: `samsung A36 giá bao nhiêu` và nhấn Enter để xem kết quả.
+
+Chạy kiểm tra điểm tương đồng (test_similarity.py):
+
+```bash
+source bge_env/bin/activate
+python test_similarity.py
+```
+Script này sẽ in ra top 10 đoạn văn có điểm cosine similarity cao nhất với câu hỏi mẫu, giúp bạn kiểm tra độ khớp thực tế giữa câu hỏi và dữ liệu.
 
 Liên hệ/ tác giả: (Bạn có thể thêm thông tin tác giả hoặc liên hệ ở đây.)
