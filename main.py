@@ -1,16 +1,48 @@
 import os
 import json
-from typing import List
+from typing import List, Dict, Any
 from FlagEmbedding import BGEM3FlagModel
 import faiss
 import numpy as np
+import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from functools import lru_cache
-from gemini_api import ask_gemini
+from gemini_api import ask_gemini, refine_query
 
 app = FastAPI(title="Document QA API")
 
+CHAT_HISTORY_FILE = "chat_history.json"
+MAX_HISTORY_MESSAGES = 20  # Lấy 20 tin nhắn gần nhất (10 lượt hỏi - đáp)
+SESSION_EXPIRY_SECONDS = 10 * 60  # 10 phút
+
+def load_chat_history() -> Dict[str, Any]:
+    """Load chat history and timestamps from JSON file."""
+    if os.path.exists(CHAT_HISTORY_FILE):
+        try:
+            with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # Cleanup expired sessions upon load
+                current_time = time.time()
+                cleaned_data = {}
+                for sid, info in data.items():
+                    # Handle legacy format without timestamps or check expiry
+                    if isinstance(info, dict) and "last_accessed" in info:
+                        if current_time - info["last_accessed"] <= SESSION_EXPIRY_SECONDS:
+                            cleaned_data[sid] = info
+                    else:
+                        # Legacy format (list directly) or invalid - reset
+                        # We don't migrate legacy formats to avoid keeping stale data forever
+                        pass
+                return cleaned_data
+        except Exception:
+            return {}
+    return {}
+
+def save_chat_history(history: Dict[str, Any]):
+    """Save chat history and timestamps to JSON file."""
+    with open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
 
 def normalize_embeddings(embs):
     """Normalize embeddings to unit length for cosine similarity."""
@@ -24,6 +56,7 @@ MODEL_NAME = "BAAI/bge-m3"
 
 
 class QueryRequest(BaseModel):
+    session_id: str = "default"
     question: str
     topk: int = 20
     threshold: float = 0.6  # Cosine similarity threshold
@@ -70,9 +103,21 @@ def query(req: QueryRequest):
     if index is None:
         raise HTTPException(status_code=400, detail="Index not available. Call /rebuild first.")
 
-    q = req.question.strip()
-    if not q:
+    raw_q = req.question.strip()
+    if not raw_q:
         raise HTTPException(status_code=400, detail="Empty question")
+
+    # Load history
+    current_time = time.time()
+    all_histories = load_chat_history()
+    
+    session_data = all_histories.get(req.session_id, {"messages": [], "last_accessed": current_time})
+    chat_history = session_data.get("messages", [])
+
+    # Tiền xử lý câu hỏi qua Gemini để sửa lỗi và lọc từ khóa nhận biết ngữ cảnh
+    print(f"\n[QUERY] Session: '{req.session_id}' | Câu hỏi gốc: '{raw_q}'")
+    q = refine_query(raw_q, chat_history)
+    print(f"[QUERY] Sau khi qua Gemini: '{q}'")
 
     cache_key = f"{q}|{req.topk}|{req.threshold}"
     if cache_key in query_cache:
@@ -91,9 +136,29 @@ def query(req: QueryRequest):
             item = chunks[idx]
             results.append({"text": item.get("text"), "file": item.get("file"), "page": item.get("page"), "score": float(similarity)})
         query_cache[cache_key] = results
+        
     # Gọi Gemini
-    payload = {"question": q, "results": results}
+    payload = {
+        "question": q,
+        "results": results,
+        "chat_history": chat_history
+    }
     gemini_answer = ask_gemini(payload)
+
+    # Save to history
+    chat_history.append({"role": "user", "text": raw_q})
+    chat_history.append({"role": "model", "text": gemini_answer})
+    
+    # Keep only recent messages
+    if len(chat_history) > MAX_HISTORY_MESSAGES:
+        chat_history = chat_history[-MAX_HISTORY_MESSAGES:]
+        
+    all_histories[req.session_id] = {
+        "messages": chat_history,
+        "last_accessed": time.time()
+    }
+    save_chat_history(all_histories)
+    
     return {"gemini_answer": gemini_answer}
 
 
