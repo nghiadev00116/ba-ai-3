@@ -1,5 +1,19 @@
 bge_env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# FAISS and Model Data
 chunks.json
 faiss.index
-__pycache__/
+index_history.json
 pdf_docs/
+
+# Chat History
+chat_history.json
+
+# Environment and Configs
+.env
+.env.local
+.vscode/

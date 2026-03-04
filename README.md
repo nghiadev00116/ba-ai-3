@@ -1,128 +1,135 @@
-# Dự án: BA-AI-3
+# Dự án: RAG Chatbot AI
 
-Mô tả ngắn: repo này xử lý embedding từ tài liệu PDF và tìm các đoạn liên quan bằng FAISS.
+Dự án này là một hệ thống Hỏi-Đáp (QA) tự động dựa trên tài liệu PDF/DOCX, kết hợp giữa mô hình tìm kiếm vector **FAISS** và mô hình sinh ngôn ngữ lớn **Google Gemini**. Hệ thống có khả năng **nhớ lịch sử trò chuyện** của từng người dùng để mang lại trải nghiệm tự nhiên.
 
-Tệp chính:
-- `main.py`: điểm chạy chính — đọc PDF từ thư mục `pdf_docs`, chia văn bản thành đoạn (chunks), sinh embedding bằng `BGEM3FlagModel`, tạo index FAISS và thực hiện truy vấn ví dụ.
+## Tính năng chính
 
-Phụ thuộc chính (được suy ra từ `main.py`):
-- `pypdf`
-- `flagembedding` (gói hiển thị dưới dạng `FlagEmbedding` trong mã)
-- `faiss` (hoặc `faiss-cpu` tùy nền tảng)
-- `numpy`
+- **Xử lý tài liệu:** Trích xuất văn bản từ file PDF/DOCX, chia nhỏ (chunking), và tạo vector nhúng (embedding) bằng mô hình `BAAI/bge-m3`.
+- **Tìm kiếm cục bộ (Vector Search):** Tốc độ cực nhanh nhờ FAISS (Cosine Similarity).
+- **Hỏi đáp thông minh:** Sử dụng API của Google Gemini (Flash) để phân tích tài liệu tìm được và trả lời đúng trọng tâm.
+- **Lịch sử trò chuyện:**
+  - Ghi nhớ ngữ cảnh đối thoại theo từng `session_id`.
+  - Tự động xóa lịch sử nếu user không tương tác quá thời gian quy định (10 phút).
+- **Cấu hình động:** Toàn bộ tinh chỉnh AI và máy chủ được đưa ra file `.env` tiện lợi.
 
-Môi trường Python:
-- Dự án có virtualenv: `bge_env/` (Python 3.13 theo cấu trúc thư mục). Sử dụng virtualenv này hoặc tạo một môi trường mới với Python 3.13.
+---
 
-Hướng dẫn nhanh — cục bộ (macOS / zsh):
-1. Kích hoạt virtualenv có sẵn (nếu muốn dùng môi trường có sẵn):
+## 🚀 Cài đặt môi trường
 
-```bash
-source bge_env/bin/activate
-```
+Dự án yêu cầu **Python 3.1x**.
 
-2. Nếu bạn không dùng virtualenv có sẵn, tạo và kích hoạt một môi trường mới:
+1. **Tạo môi trường ảo (Khuyến nghị):**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-3. Cài phụ thuộc (nếu bạn có `requirements.txt`, dùng thay thế):
+2. **Cài đặt thư viện:**
+   Dự án đã có danh sách các phiên bản thư viện đang hoạt động ổn định nhất:
 
 ```bash
-pip install pypdf flagembedding numpy faiss-cpu
+pip install -r requirements.txt
 ```
 
-Ghi chú: Trên một số hệ (GPU / nhiều nền tảng), tên gói `faiss` có thể khác (ví dụ `faiss-gpu`). Điều chỉnh cho phù hợp.
+---
 
-Chạy chương trình:
+## ⚙️ Cấu hình (File `.env`)
 
-```bash
-python main.py
+Hệ thống hoạt động dựa trên cấu hình môi trường. Bạn **phải** tạo một file `.env` ở thư mục gốc của dự án. Xem ví dụ mẫu:
+
+```env
+# --- GEMINI (LLM) ---
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MAX_TOKENS=800000
+
+# --- LỊCH SỬ CHAT ---
+# Số tin nhắn nhớ được cho mỗi người dùng (20 tin = 10 vòng hỏi đáp)
+MAX_HISTORY_MESSAGES=20
+SESSION_EXPIRY_MINUTES=10
+
+# --- CẤU HÌNH SERVER ---
+SERVER_HOST=127.0.0.1
+SERVER_PORT=8000
+
+# --- TÌM KIẾM VECTOR ---
+EMBEDDING_MODEL=BAAI/bge-m3
+CHUNK_SIZE=200
+DEFAULT_TOP_K=20
+DEFAULT_THRESHOLD=0.35
 ```
 
-Build index once and query many times:
+---
 
-- Tạo index (chỉ chạy 1 lần, lưu ra `faiss.index` và `chunks.json`):
+## 🛠 Cách sử dụng (Luồng hoạt động)
+
+### Bước 1: Nạp tài liệu (Build Index)
+
+Đặt các file tài liệu (`.pdf`, `.docx`) của bạn vào thư mục `pdf_docs/`. Chạy lệnh sau để hệ thống bắt đầu "học" bài:
 
 ```bash
 python build_index.py --docs pdf_docs --index faiss.index --chunks chunks.json
 ```
 
-- Mở chế độ tương tác để hỏi nhiều câu (không cần đọc lại file mỗi lần):
+_Ghi chú: Nếu file cũ không thay đổi, lệnh này sẽ bỏ qua không quét lại nhờ có tracking file `index_history.json`._
+
+### Bước 2: Khởi động Server API
+
+Bạn có thể chạy server bằng script python thông thường:
 
 ```bash
-python query.py --index faiss.index --chunks chunks.json
-```
-
-Tham số hữu ích:
-- `--topk`: số ứng viên trả về (mặc định 5)
-- `--threshold`: ngưỡng cosine similarity (0–1, mặc định 0.7). Giá trị cao hơn = chặt chẽ hơn. Thử 0.65–0.8 tùy yêu cầu.
-
-HTTP API (dùng Postman):
-
-- Chạy server bằng `uvicorn` hoặc trực tiếp bằng `python main.py`:
-
-```bash
-# bằng uvicorn (khuyến nghị)
-uvicorn main:app --host 127.0.0.1 --port 8000
-
-# hoặc trực tiếp (chạy uvicorn nội bộ)
 python main.py
 ```
 
-- Endpoint hỏi:
+Hoặc chạy thông qua uvicorn (Khuyến nghị dùng để theo dõi log và tốc độ truy xuất tốt hơn):
 
-POST http://127.0.0.1:8000/query
+```bash
+uvicorn main:app --host 127.0.0.1 --port 8000
+```
 
-Body (JSON):
+_Server mặc định lắng nghe ở `http://127.0.0.1:8000` (Thay đổi trong file `.env`)_
+
+---
+
+## 🌐 API Documentation
+
+Bạn có thể dùng Postman để test các Endpoint sau:
+
+### 1. `POST /query` (Tham số Chat)
+
+Để AI ghi nhớ lịch sử hội thoại, bạn cần truyền theo một `session_id` riêng biệt cho mỗi người dùng (hoặc mỗi phiên đăng nhập).
+
+**Body (JSON):**
 
 ```json
 {
-	"question": "Câu hỏi của bạn",
-	"topk": 5,
-  "threshold": 0.7
+  "session_id": "khachhang_abc123",
+  "question": "Samsung A36 giá bao nhiêu?",
+  "topk": 20,
+  "threshold": 0.35
 }
 ```
 
-**Ghi chú về threshold**: Sau khi chuyển sang cosine similarity, `threshold` là giá trị từ 0–1 (0.7 nghĩa là cosine >= 0.7). Giá trị cao hơn = kết quả khớp chặt chẽ hơn.
+**\*Gợi ý:** Nếu bạn hỏi tiếp "Nó có chống nước không?" với cùng `session_id` đó, hệ thống sẽ tự hiểu "Nó" là Samsung A36.\*
+
+### 2. `POST /rebuild` (Làm mới nền tảng dữ liệu)
+
+Gọi API này nếu bạn mới ném thêm file PDF/DOCX vào thư mục máy chủ và muốn Web AI lập tức cập nhật tài liệu mới mà không cần tắt/bật lại server.
+
+**Body (JSON):**
 
 ```json
 {
-	"docs_dir": "pdf_docs",
-	"index_path": "faiss.index",
-	"chunks_path": "chunks.json"
+  "docs_dir": "pdf_docs",
+  "index_path": "faiss.index",
+  "chunks_path": "chunks.json"
 }
 ```
 
-Ghi chú: server sẽ giữ index, chunks và mô hình trong bộ nhớ (cache) để trả lời nhiều yêu cầu mà không phải đọc lại file.
+---
 
-Thiết kế & ghi chú kỹ thuật:
-- `main.py` dùng `BGEM3FlagModel('BAAI/bge-m3')` để sinh embedding.
-- Văn bản từ PDF được chia theo số từ (`chunk_size=200`) rồi mã hóa theo lô (`batch_size=8`).
-- **Cosine similarity**: Tất cả embeddings được chuẩn hoá (normalized) và FAISS index dùng `IndexFlatIP` (inner product trên vector chuẩn = cosine similarity).
-- Kết quả trả về có `score` là cosine similarity (0–1, cao hơn = liên quan hơn).
+## 🧪 Công cụ Test bổ sung
 
-Thay đổi gợi ý / bước tiếp theo:
-- Thêm `requirements.txt` hoặc `pyproject.toml` để quản lý phụ thuộc rõ ràng.
-- Viết script/CLI để cho phép nhập câu hỏi từ người dùng (hiện `query` trong `main.py` là cố định).
-- Lưu index FAISS ra file để không phải rebuild mỗi lần.
-
-Chạy thử query.py (giao diện dòng lệnh):
-
-```bash
-source bge_env/bin/activate
-python query.py --index faiss.index --chunks chunks.json --topk 5 --threshold 0.6
-```
-Sau đó nhập câu hỏi trực tiếp, ví dụ: `samsung A36 giá bao nhiêu` và nhấn Enter để xem kết quả.
-
-Chạy kiểm tra điểm tương đồng (test_similarity.py):
-
-```bash
-source bge_env/bin/activate
-python test_similarity.py
-```
-Script này sẽ in ra top 10 đoạn văn có điểm cosine similarity cao nhất với câu hỏi mẫu, giúp bạn kiểm tra độ khớp thực tế giữa câu hỏi và dữ liệu.
-
-Liên hệ/ tác giả: (Bạn có thể thêm thông tin tác giả hoặc liên hệ ở đây.)
+- `python query.py`: Giao diện dòng lệnh (CLI Terminal) để test trò chuyện chay thay vì gọi API. (Cần chạy `build_index` trước).
+- `python test_similarity.py`: In ra Top các tài liệu giống nhất với từ khoá để kiểm tra thuật toán Vector FAISS.
