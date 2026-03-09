@@ -10,11 +10,18 @@ import faiss
 import numpy as np
 import time
 from pypdf import PdfReader
+from dotenv import load_dotenv
+
+load_dotenv()
+
 try:
     import docx
 except Exception:
     docx = None
 from FlagEmbedding import BGEM3FlagModel
+
+DEFAULT_EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+DEFAULT_CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 200))
 
 
 def normalize_embeddings(embs):
@@ -28,7 +35,7 @@ def chunk_text(text, chunk_size=200):
     return [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
 
 
-def extract_text_from_docx(path):
+def extract_text_from_docx(path): 
     if docx is None:
         return None
     doc = docx.Document(path)
@@ -164,9 +171,9 @@ if __name__ == "__main__":
     parser.add_argument("--index", default="faiss.index", help="Path to write FAISS index")
     parser.add_argument("--chunks", default="chunks.json", help="Path to write chunks+metadata (json)")
     parser.add_argument("--history", default="index_history.json", help="Path to write indexing history")
-    parser.add_argument("--model", default="BAAI/bge-m3", help="Embedding model name")
+    parser.add_argument("--model", default=DEFAULT_EMBEDDING_MODEL, help="Embedding model name")
     parser.add_argument("--batch", type=int, default=8, help="Embedding batch size")
-    parser.add_argument("--chunk_size", type=int, default=200, help="Words per chunk")
+    parser.add_argument("--chunk_size", type=int, default=DEFAULT_CHUNK_SIZE, help="Words per chunk")
     parser.add_argument("--files_per_batch", type=int, default=10, help="Number of files to process per batch before saving to disk")
 
     args = parser.parse_args()

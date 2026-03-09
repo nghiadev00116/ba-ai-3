@@ -1,10 +1,19 @@
 from google import genai
 import json
-
+import os
+from dotenv import load_dotenv
 import tiktoken
+from google import genai
+
+load_dotenv()
+
+# Lấy cấu hình từ biến môi trường
+api_key = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", 800000))
 
 # Khởi tạo client chung trên cùng để tái sử dụng
-_client = genai.Client(api_key="AIzaSyB4HwF-flp11ollq4FD5vseAx3QWp0UF3I")
+_client = genai.Client(api_key=api_key)
 
 def refine_query(raw_question, chat_history=None):
     """Sử dụng Gemini để tiền xử lý: sửa lỗi chính tả và tối ưu hóa từ khóa tìm kiếm, dựa trên ngữ cảnh lịch sử."""
@@ -32,7 +41,7 @@ def refine_query(raw_question, chat_history=None):
     prompt = f"{system_prompt}\n\n{history_str}Câu hỏi thô cần xử lý:\n{raw_question}"
     
     response = _client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=GEMINI_MODEL,
         contents=prompt
     )
     
@@ -45,8 +54,6 @@ def ask_gemini(payload):
     # Giới hạn của Gemini 1.5/2.0 Flash thường là 1 triệu tokens (input). 
     # Ta lấy 80% là khoảng 800,000 tokens. 
     # Tuy nhiên, để response nhanh và an toàn, ta có thể đặt limit thấp hơn tùy nhu cầu
-    # Ở đây set cứng 800,000 tokens (80% của 1M)
-    MAX_TOKENS = 800000 
     
     encoding = tiktoken.get_encoding("cl100k_base")
     
@@ -72,7 +79,7 @@ def ask_gemini(payload):
         chunk_text = f"- (file: {r['file']}, page: {r['page']})\n{r['text']}\n\n"
         chunk_tokens = len(encoding.encode(chunk_text))
         
-        if current_tokens + chunk_tokens > MAX_TOKENS:
+        if current_tokens + chunk_tokens > GEMINI_MAX_TOKENS:
             print(f"Token limit reached! Truncating results. Tokens: {current_tokens}")
             break
             
@@ -115,7 +122,7 @@ def ask_gemini(payload):
     print("="*50)
 
     response = _client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=GEMINI_MODEL,
         contents=prompt
     )
 

@@ -8,13 +8,18 @@ import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from functools import lru_cache
+from dotenv import load_dotenv
+
 from gemini_api import ask_gemini, refine_query
+
+load_dotenv()
 
 app = FastAPI(title="Document QA API")
 
 CHAT_HISTORY_FILE = "chat_history.json"
-MAX_HISTORY_MESSAGES = 20  # Lấy 20 tin nhắn gần nhất (10 lượt hỏi - đáp)
-SESSION_EXPIRY_SECONDS = 10 * 60  # 10 phút
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", 20))  # Lấy N tin nhắn gần nhất
+SESSION_EXPIRY_MINUTES = int(os.getenv("SESSION_EXPIRY_MINUTES", 10))
+SESSION_EXPIRY_SECONDS = SESSION_EXPIRY_MINUTES * 60
 
 def load_chat_history() -> Dict[str, Any]:
     """Load chat history and timestamps from JSON file."""
@@ -52,14 +57,20 @@ def normalize_embeddings(embs):
 INDEX_PATH = "faiss.index"
 CHUNKS_PATH = "chunks.json"
 DOCS_DIR = "pdf_docs"
-MODEL_NAME = "BAAI/bge-m3"
+
+# System configs
+MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+SERVER_HOST = os.getenv("SERVER_HOST", "127.0.0.1")
+SERVER_PORT = int(os.getenv("SERVER_PORT", 8000))
+DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", 20))
+DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", 0.35))
 
 
 class QueryRequest(BaseModel):
     session_id: str = "default"
     question: str
-    topk: int = 20
-    threshold: float = 0.6  # Cosine similarity threshold
+    topk: int = DEFAULT_TOP_K
+    threshold: float = DEFAULT_THRESHOLD  # Cosine similarity threshold
 
 
 class RebuildRequest(BaseModel):
@@ -177,4 +188,4 @@ def rebuild(req: RebuildRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("main:app", host=SERVER_HOST, port=SERVER_PORT, reload=False)
