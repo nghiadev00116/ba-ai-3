@@ -64,6 +64,16 @@ DEFAULT_THRESHOLD=0.35
 
 ## 🛠 Cách sử dụng (Luồng hoạt động)
 
+### Bước 0: Tạo dữ liệu ảo (Tùy chọn)
+
+Nếu bạn chưa có sẵn các tài liệu PDF/DOCX để test, dự án có kèm theo các script sinh dữ liệu giả lập tự động vào thư mục `pdf_docs/`. Chạy **một trong các lệnh** dưới đây từ thư mục gốc của dự án:
+
+```bash
+python scripts/generate_mock_appliances.py      # Sinh 100 file DOCX (Điện máy)
+python scripts/generate_mock_appliances_pdf.py  # Sinh 100 file PDF (Điện máy - có font tiếng Việt)
+python scripts/generate_mock_docx.py            # Sinh 100 file DOCX (Điện thoại, Laptop)
+```
+
 ### Bước 1: Nạp tài liệu (Build Index)
 
 Đặt các file tài liệu (`.pdf`, `.docx`) của bạn vào thư mục `pdf_docs/`. Chạy lệnh sau để hệ thống bắt đầu "học" bài:
